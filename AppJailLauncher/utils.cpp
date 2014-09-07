@@ -129,14 +129,21 @@ HRESULT GetAppContainerSid(LPCTSTR pszChildFilePath, PSID *ppSid)
 	PTSTR pszAppContainerName = PathFindFileName(pszChildFilePath);
 	PSID pSid = NULL;
 
-	LOG("Retrieving AppContainer SID for %s.\n", pszChildFilePath);
+	LOG("Retrieving AppContainer SID for %s (%s).\n", pszChildFilePath, pszAppContainerName);
 	W32_ASSERT(SUCCEEDED(DeriveAppContainerSidFromAppContainerName(
 		pszAppContainerName,
 		&pSid
 		)), Exit);
 
+	*ppSid = pSid;
+	pSid = NULL;
+
 	hr = S_OK;
 Exit:
+	if (pSid != NULL) {
+		FreeSid(pSid);
+	}
+
 	return hr;
 }
 
@@ -383,7 +390,6 @@ HRESULT CreateAppContainerWorker(
 
 	ASSERT(s != INVALID_SOCKET, Exit);
 	ASSERT(hJob != INVALID_HANDLE_VALUE, Exit);
-	ASSERT(pszCurrentDirectory != NULL, Exit);
 	ASSERT(pAppContainerSid != NULL, Exit);
 	ASSERT(pszChildFilePath != NULL, Exit);
 
@@ -420,7 +426,6 @@ HRESULT CreateAppContainerWorker(
 	SecurityCapabilities.CapabilityCount = dwCapabilitiesCount;
 
 	// Set up thread attribute list
-	// TODO: also add one for inheritable handle list?
 	W32_ASSERT(!InitializeProcThreadAttributeList(
 		NULL,
 		1,
@@ -449,7 +454,7 @@ HRESULT CreateAppContainerWorker(
 		sizeof(SecurityCapabilities),
 		NULL,
 		NULL), Exit);
-	
+
 	si.lpAttributeList = AttributeList;
 
 	// Setup STDIN/STDOUT/STDERR redirection
@@ -462,9 +467,9 @@ HRESULT CreateAppContainerWorker(
 
 	// Copy the child file path and spawn process
 	LOG("Copying pszChildFilePath to pszCommandLine.\n");
-	pszCommandLine = (LPTSTR) ALLOC((_tcslen(pszChildFilePath) + 1) * sizeof(_TCHAR));
+	pszCommandLine = (LPTSTR) ALLOC((_tcslen(pszChildFilePath) + 2) * sizeof(_TCHAR));
 	ASSERT(pszCommandLine != NULL, Exit);
-	_tcscpy_s(pszCommandLine, _tcslen(pszChildFilePath), pszChildFilePath);
+	_tcscpy_s(pszCommandLine, _tcslen(pszChildFilePath) + 1, pszChildFilePath);
 
 	LOG("Launching new process \"%s\".\n", pszCommandLine);
 	W32_ASSERT(CreateProcess(
@@ -472,7 +477,8 @@ HRESULT CreateAppContainerWorker(
 		pszCommandLine,
 		NULL,
 		NULL,
-		TRUE, // XXX: does this expose our sandbox to more attack surface?
+		TRUE, // TODO: FIXME: I don't like how we're just blanket allowing all handles to be
+		      //              inherited.
 		EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED,
 		NULL,
 		pszCurrentDirectory,

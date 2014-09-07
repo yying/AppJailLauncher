@@ -154,7 +154,6 @@ BOOL WINAPI HandleCtrlCPress(DWORD dwCtrlType)
 	}
 }
 
-// TODO:
 HRESULT GetFullKeyPathAndKeyParentDirectory(
 	LPCTSTR pszKeyFilePath,
 	LPTSTR pszFullKeyPath,
@@ -196,23 +195,25 @@ int Do_Uninstall(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath)
 	LOG("  ChildFilePath: %s\n", pszChildFilePath);
 	LOG("  KeyFilePath:   %s\n", pszKeyFilePath);
 
-	ASSERT(SUCCEEDED(GetFullKeyPathAndKeyParentDirectory(
-		pszKeyFilePath,
-		szFullKeyPath,
-		(sizeof(szFullKeyPath) / sizeof(_TCHAR)),
-		szCurrentDirectory,
-		(sizeof(szCurrentDirectory) / sizeof(_TCHAR))
-		)), Exit);
-
-	LOG("  FullKeyPath: %s\n", szFullKeyPath);
-	LOG("  FullKeyDir: %s\n", szCurrentDirectory);
-
 	if (!SUCCEEDED(GetAppContainerSid(pszChildFilePath, &pApplicationSid))) {
 		PRINT("AppContainer profile for %s does not exist.\n", pszChildFilePath);
 		goto Exit;
 	}
 
+	LOG("AppContainer SID at 0x%016p\n", pApplicationSid);
+
 	if (pszKeyFilePath) {
+		ASSERT(SUCCEEDED(GetFullKeyPathAndKeyParentDirectory(
+			pszKeyFilePath,
+			szFullKeyPath,
+			(sizeof(szFullKeyPath) / sizeof(_TCHAR)),
+			szCurrentDirectory,
+			(sizeof(szCurrentDirectory) / sizeof(_TCHAR))
+			)), Exit);
+
+		LOG("  FullKeyPath: %s\n", szFullKeyPath);
+		LOG("  FullKeyDir: %s\n", szCurrentDirectory);
+
 		// Remove the AppContainer's SID from the ACL of the key
 		ASSERT(SUCCEEDED(AddOrRemoveAceOnFileObjectAcl(
 			TRUE,
@@ -240,6 +241,9 @@ int Do_Uninstall(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath)
 	nret = 0;
 
 Exit:
+	if (pApplicationSid != NULL) {
+		FreeSid(pApplicationSid);
+	}
 
 	return nret;
 }
@@ -260,6 +264,7 @@ int Do_LaunchServer(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath, USHORT usPor
 	_TCHAR clientIpAddr[64] = { 0 };
 	_TCHAR szFullKeyPath[1024] = { 0 };
 	_TCHAR szCurrentDirectory[1024] = { 0 };
+	LPTSTR pszCurrentDirectory = NULL;
 
 	LOG("Do_LaunchServer entered.\n");
 
@@ -271,17 +276,6 @@ int Do_LaunchServer(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath, USHORT usPor
 	LOG("  ChildTimeout:   %i seconds\n", dwTimeout);
 	LOG("  NetworkEnabled: %s\n", bNetworkEnabled ? _T("True") : _T("False"));
 
-	ASSERT(SUCCEEDED(GetFullKeyPathAndKeyParentDirectory(
-		pszKeyFilePath,
-		szFullKeyPath,
-		(sizeof(szFullKeyPath) / sizeof(_TCHAR)),
-		szCurrentDirectory,
-		(sizeof(szCurrentDirectory) / sizeof(_TCHAR))
-		)), Exit);
-
-	LOG("  KeyFilePath: %s\n", szFullKeyPath);
-	LOG("  KeyCurrentDirectory: %s\n", szCurrentDirectory);
-
 	// Find or create appcontainer sid
 	if (!SUCCEEDED(FindOrCreateAppContainerProfile(pszChildFilePath, &pApplicationSid))) {
 		PRINT("Failed to find or create an AppContainer profile for %s\n", pszChildFilePath);
@@ -290,6 +284,18 @@ int Do_LaunchServer(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath, USHORT usPor
 	}
 
 	if (pszKeyFilePath) {
+		ASSERT(SUCCEEDED(GetFullKeyPathAndKeyParentDirectory(
+			pszKeyFilePath,
+			szFullKeyPath,
+			(sizeof(szFullKeyPath) / sizeof(_TCHAR)),
+			szCurrentDirectory,
+			(sizeof(szCurrentDirectory) / sizeof(_TCHAR))
+			)), Exit);
+		pszCurrentDirectory = szCurrentDirectory;
+
+		LOG("  KeyFilePath: %s\n", szFullKeyPath);
+		LOG("  KeyCurrentDirectory: %s\n", szCurrentDirectory);
+
 		// Add an ACE containing the AppContainer's SID into key's parent directory's ACL
 		ASSERT(SUCCEEDED(AddOrRemoveAceOnFileObjectAcl(
 			FALSE,
@@ -360,7 +366,7 @@ int Do_LaunchServer(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath, USHORT usPor
 			if (SUCCEEDED(CreateAppContainerWorker(
 				clientSocket,
 				hJob,
-				szCurrentDirectory,
+				pszCurrentDirectory,
 				pApplicationSid,
 				pszChildFilePath,
 				pszCapabilitiesList
