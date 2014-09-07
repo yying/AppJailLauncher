@@ -154,24 +154,80 @@ BOOL WINAPI HandleCtrlCPress(DWORD dwCtrlType)
 	}
 }
 
+// TODO:
+HRESULT GetFullKeyPathAndKeyParentDirectory(
+	LPCTSTR pszKeyFilePath,
+	LPTSTR pszFullKeyPath,
+	DWORD cbFullKeyPath,
+	LPTSTR pszCurrentDirectory,
+	DWORD cbCurrentDirectory
+	) {
+	HRESULT hr = E_FAIL;
+	LPTSTR pszKeyFileSpec = NULL;
+
+	W32_ASSERT(GetFullPathName(
+		pszKeyFilePath,
+		cbFullKeyPath,
+		pszFullKeyPath,
+		&pszKeyFileSpec
+		) > 0, Exit);
+	_tcscpy_s(
+		pszCurrentDirectory,
+		cbCurrentDirectory - 1,
+		pszFullKeyPath
+		);
+	W32_ASSERT(PathRemoveFileSpec(pszCurrentDirectory), Exit);
+
+	hr = S_OK;
+Exit:
+	return hr;
+}
+
 int Do_Uninstall(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath)
 {
 	int nret = -1;
 
 	PSID pApplicationSid = NULL;
 
+	_TCHAR szFullKeyPath[1024] = { 0 };
+	_TCHAR szCurrentDirectory[1024] = { 0 };
+
 	LOG("Do_Uninstall entered.\n");
 	LOG("  ChildFilePath: %s\n", pszChildFilePath);
 	LOG("  KeyFilePath:   %s\n", pszKeyFilePath);
-	
+
+	ASSERT(SUCCEEDED(GetFullKeyPathAndKeyParentDirectory(
+		pszKeyFilePath,
+		szFullKeyPath,
+		(sizeof(szFullKeyPath) / sizeof(_TCHAR)),
+		szCurrentDirectory,
+		(sizeof(szCurrentDirectory) / sizeof(_TCHAR))
+		)), Exit);
+
+	LOG("  FullKeyPath: %s\n", szFullKeyPath);
+	LOG("  FullKeyDir: %s\n", szCurrentDirectory);
+
 	if (!SUCCEEDED(GetAppContainerSid(pszChildFilePath, &pApplicationSid))) {
 		PRINT("AppContainer profile for %s does not exist.\n", pszChildFilePath);
 		goto Exit;
 	}
 
 	if (pszKeyFilePath) {
-		// TODO: remove ACE from directory ACL
-		// TODO: remove ACE from key ACL
+		// Remove the AppContainer's SID from the ACL of the key
+		ASSERT(SUCCEEDED(AddOrRemoveAceOnFileObjectAcl(
+			TRUE,
+			szFullKeyPath,
+			pApplicationSid,
+			GENERIC_READ
+			)), Exit);
+
+		// Remove the AppContainer's SID fro the ACL of the key's parent directory
+		ASSERT(SUCCEEDED(AddOrRemoveAceOnFileObjectAcl(
+			TRUE,
+			szCurrentDirectory,
+			pApplicationSid,
+			GENERIC_READ | FILE_LIST_DIRECTORY
+			)), Exit);
 	}
 
 	if (SUCCEEDED(DestroyAppContainerProfile(pszChildFilePath))) {
@@ -202,6 +258,8 @@ int Do_LaunchServer(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath, USHORT usPor
 	struct sockaddr_storage clientAddr = { 0 };
 
 	_TCHAR clientIpAddr[64] = { 0 };
+	_TCHAR szFullKeyPath[1024] = { 0 };
+	_TCHAR szCurrentDirectory[1024] = { 0 };
 
 	LOG("Do_LaunchServer entered.\n");
 
@@ -213,6 +271,17 @@ int Do_LaunchServer(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath, USHORT usPor
 	LOG("  ChildTimeout:   %i seconds\n", dwTimeout);
 	LOG("  NetworkEnabled: %s\n", bNetworkEnabled ? _T("True") : _T("False"));
 
+	ASSERT(SUCCEEDED(GetFullKeyPathAndKeyParentDirectory(
+		pszKeyFilePath,
+		szFullKeyPath,
+		(sizeof(szFullKeyPath) / sizeof(_TCHAR)),
+		szCurrentDirectory,
+		(sizeof(szCurrentDirectory) / sizeof(_TCHAR))
+		)), Exit);
+
+	LOG("  KeyFilePath: %s\n", szFullKeyPath);
+	LOG("  KeyCurrentDirectory: %s\n", szCurrentDirectory);
+
 	// Find or create appcontainer sid
 	if (!SUCCEEDED(FindOrCreateAppContainerProfile(pszChildFilePath, &pApplicationSid))) {
 		PRINT("Failed to find or create an AppContainer profile for %s\n", pszChildFilePath);
@@ -221,8 +290,21 @@ int Do_LaunchServer(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath, USHORT usPor
 	}
 
 	if (pszKeyFilePath) {
-		// TODO: add ACE to directory ACL
-		// TODO: add ACE to key ACL
+		// Add an ACE containing the AppContainer's SID into key's parent directory's ACL
+		ASSERT(SUCCEEDED(AddOrRemoveAceOnFileObjectAcl(
+			FALSE,
+			szCurrentDirectory,
+			pApplicationSid,
+			GENERIC_READ | FILE_LIST_DIRECTORY
+			)), Exit);
+
+		// Add an ACE containing the AppContainer's SID into key's ACL
+		ASSERT(SUCCEEDED(AddOrRemoveAceOnFileObjectAcl(
+			FALSE,
+			szFullKeyPath,
+			pApplicationSid,
+			GENERIC_READ
+			)), Exit);
 	}
 
 	if (bNetworkEnabled) {
@@ -278,6 +360,7 @@ int Do_LaunchServer(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath, USHORT usPor
 			if (SUCCEEDED(CreateAppContainerWorker(
 				clientSocket,
 				hJob,
+				szCurrentDirectory,
 				pApplicationSid,
 				pszChildFilePath,
 				pszCapabilitiesList
@@ -343,6 +426,7 @@ int _tmain(int argc, _TCHAR* argv[])
 	}
 
 	/*
+	// TODO: should we remove this check to be just a command-line argument?
 	if (!FileExists(CmdOpts.ChildFilePath)) {
 		ShowError("%s does not exist.", CmdOpts.ChildFilePath);
 

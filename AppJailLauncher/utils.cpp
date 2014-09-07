@@ -52,7 +52,7 @@ HRESULT SocketCreateAndListen(USHORT usPort, SOCKET *pSocket)
 			p->ai_family,
 			(PVOID) &((struct sockaddr_in *) p->ai_addr)->sin_addr,
 			szAddr,
-			sizeof(szAddr)
+			sizeof(szAddr) / sizeof(_TCHAR)
 			),
 		htons(((struct sockaddr_in *) p->ai_addr)->sin_port)
 		);
@@ -230,7 +230,10 @@ HRESULT AddOrRemoveAceOnFileObjectAcl(
 		&DaclDefaulted
 		), Exit);
 	LOG("DACL at %016p and is%s present.\n", pOldDacl, DaclPresent ? _T("") : _T(" not"));
-	ASSERT(pOldDacl != NULL, Exit); // FIXME: not sure how to handle this case, can we create a new DACL?
+	ASSERT(pOldDacl != NULL, Exit); // TODO: FIXME: This is a possible scenario
+	                                //   On certain file systems, a DACL will not be present.
+	                                //   For now, we will just exit with an error. Perhaps in
+	                                //   the future, creating a new DACL might work out better.
 
 	AclInfo.AceCount = 0;
 	AclInfo.AclBytesFree = 0;
@@ -359,6 +362,7 @@ Exit:
 HRESULT CreateAppContainerWorker(
 	SOCKET s,
 	HANDLE hJob,
+	LPCTSTR pszCurrentDirectory,
 	PSID pAppContainerSid,
 	LPCTSTR pszChildFilePath,
 	LPCTSTR *pszCapabilities
@@ -379,6 +383,7 @@ HRESULT CreateAppContainerWorker(
 
 	ASSERT(s != INVALID_SOCKET, Exit);
 	ASSERT(hJob != INVALID_HANDLE_VALUE, Exit);
+	ASSERT(pszCurrentDirectory != NULL, Exit);
 	ASSERT(pAppContainerSid != NULL, Exit);
 	ASSERT(pszChildFilePath != NULL, Exit);
 
@@ -457,9 +462,9 @@ HRESULT CreateAppContainerWorker(
 
 	// Copy the child file path and spawn process
 	LOG("Copying pszChildFilePath to pszCommandLine.\n");
-	pszCommandLine = (LPTSTR) ALLOC((_tcslen(pszChildFilePath) + 2) * sizeof(_TCHAR));
+	pszCommandLine = (LPTSTR) ALLOC((_tcslen(pszChildFilePath) + 1) * sizeof(_TCHAR));
 	ASSERT(pszCommandLine != NULL, Exit);
-	_tcscpy_s(pszCommandLine, _tcslen(pszChildFilePath) + 1, pszChildFilePath);
+	_tcscpy_s(pszCommandLine, _tcslen(pszChildFilePath), pszChildFilePath);
 
 	LOG("Launching new process \"%s\".\n", pszCommandLine);
 	W32_ASSERT(CreateProcess(
@@ -470,7 +475,7 @@ HRESULT CreateAppContainerWorker(
 		TRUE, // XXX: does this expose our sandbox to more attack surface?
 		EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED,
 		NULL,
-		NULL,
+		pszCurrentDirectory,
 		(LPSTARTUPINFO) &si,
 		&pi
 		), Exit);

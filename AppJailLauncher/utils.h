@@ -19,6 +19,7 @@ HRESULT CreateLimitProcessTimeJobObject(DWORD dwTimeout, PHANDLE phJob);
 HRESULT CreateAppContainerWorker(
 	SOCKET s,
 	HANDLE hJob,
+	LPCTSTR pszCurrentDirectory,
 	PSID pAppContainerSid,
 	LPCTSTR pszChildFilePath,
 	LPCTSTR *pszCapabilities
