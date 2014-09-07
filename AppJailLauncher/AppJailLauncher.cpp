@@ -333,6 +333,12 @@ int Do_LaunchServer(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath, USHORT usPor
 		goto Exit;
 	}
 
+	LOG("Setting listening socket to not inheritable.\n");
+	W32_ASSERT(SetHandleInformation(
+		(HANDLE)serverSocket,
+		HANDLE_FLAG_INHERIT,
+		0), Exit);
+
 	LOG("Installing Ctrl-C handler.\n");
 	W32_ASSERT(SetConsoleCtrlHandler(HandleCtrlCPress, TRUE), Exit);
 
