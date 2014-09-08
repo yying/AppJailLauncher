@@ -281,7 +281,10 @@ HRESULT AddOrRemoveAceOnFileObjectAcl(
 		for (i = 0; i < AclInfo.AceCount; i++) {
 			W32_ASSERT(GetAce(pOldDacl, i, &pTempAce), Exit);
 			if (((ACCESS_ALLOWED_ACE *)pTempAce)->Header.AceFlags & INHERITED_ACE) break;
-			ASSERT(!EqualSid(pSid, &(((ACCESS_ALLOWED_ACE *)pTempAce)->SidStart)), Exit);
+			if (EqualSid(pSid, &(((ACCESS_ALLOWED_ACE *)pTempAce)->SidStart))) {
+				hr = HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS);
+				goto Exit;
+			}
 			W32_ASSERT(AddAce(pNewDacl, ACL_REVISION, MAXDWORD, pTempAce, ((PACE_HEADER)pTempAce)->AceSize), Exit);
 		}
 

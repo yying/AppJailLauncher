@@ -258,6 +258,7 @@ Exit:
 int Do_LaunchServer(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath, USHORT usPort, DWORD dwTimeout, BOOL bNetworkEnabled)
 {
 	int nret = -1;
+	HRESULT hr = E_FAIL;
 	WSADATA wsaData = { 0 };
 	SOCKET serverSocket = INVALID_SOCKET;
 	PSID pApplicationSid = NULL;
@@ -308,20 +309,28 @@ int Do_LaunchServer(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath, USHORT usPor
 		LOG("  KeyCurrentDirectory: %s\n", szCurrentDirectory);
 
 		// Add an ACE containing the AppContainer's SID into key's parent directory's ACL
-		ASSERT(SUCCEEDED(AddOrRemoveAceOnFileObjectAcl(
+		hr = AddOrRemoveAceOnFileObjectAcl(
 			FALSE,
 			szCurrentDirectory,
 			pApplicationSid,
 			GENERIC_READ | GENERIC_EXECUTE
-			)), Exit);
+			);
+		if (!SUCCEEDED(hr)) {
+			ASSERT(hr == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS), Exit);
+			LOG("  Adding ACE into key parent directory's ACL failed because ACE already exists.\n");
+		}
 
 		// Add an ACE containing the AppContainer's SID into key's ACL
-		ASSERT(SUCCEEDED(AddOrRemoveAceOnFileObjectAcl(
+		hr = AddOrRemoveAceOnFileObjectAcl(
 			FALSE,
 			szFullKeyPath,
 			pApplicationSid,
 			GENERIC_READ
-			)), Exit);
+			);
+		if (!SUCCEEDED(hr)) {
+			ASSERT(hr == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS), Exit);
+			LOG("  Adding ACE into key's ACL failed because ACE already exists.\n");
+		}
 	}
 
 	if (bNetworkEnabled) {
