@@ -234,7 +234,7 @@ int Do_Uninstall(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath)
 			TRUE,
 			szCurrentDirectory,
 			pApplicationSid,
-			GENERIC_READ | FILE_LIST_DIRECTORY
+			GENERIC_READ | GENERIC_EXECUTE
 			)), Exit);
 	}
 
@@ -312,7 +312,7 @@ int Do_LaunchServer(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath, USHORT usPor
 			FALSE,
 			szCurrentDirectory,
 			pApplicationSid,
-			GENERIC_READ | FILE_LIST_DIRECTORY
+			GENERIC_READ | GENERIC_EXECUTE
 			)), Exit);
 
 		// Add an ACE containing the AppContainer's SID into key's ACL
