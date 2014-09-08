@@ -532,8 +532,6 @@ int _tmain(int argc, _TCHAR* argv[])
 		CmdOpts.TimeoutSeconds = DEFAULT_TIMEOUT;
 	}
 
-	// TODO: do a Windows version check (Win8+)
-
 	// Parse the action to take
 	if (CmdOpts.UninstallEnabled) {
 		return Do_Uninstall(CmdOpts.ChildFilePath, CmdOpts.KeyFilePath);
