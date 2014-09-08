@@ -36,6 +36,7 @@ typedef struct _CMD_OPTIONS
 }
 
 BOOL g_keepListening = TRUE;
+WSAEVENT g_hQuitListenEvent = WSA_INVALID_EVENT;
 
 BOOL FileExists(LPTSTR pszFilePath)
 {
@@ -145,8 +146,14 @@ Exit:
 BOOL WINAPI HandleCtrlCPress(DWORD dwCtrlType)
 {
 	if (dwCtrlType == CTRL_C_EVENT) {
-		LOG("Control-C detected.\n");
-		g_keepListening = FALSE;
+		if (g_keepListening) {
+			LOG("Control-C detected. Setting event.\n");
+			if (g_hQuitListenEvent != WSA_INVALID_EVENT) {
+				WSASetEvent(g_hQuitListenEvent);
+			}
+
+			g_keepListening = FALSE;
+		}
 		return TRUE;
 	}
 	else {
@@ -266,6 +273,10 @@ int Do_LaunchServer(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath, USHORT usPor
 	_TCHAR szCurrentDirectory[1024] = { 0 };
 	LPTSTR pszCurrentDirectory = NULL;
 
+	DWORD dwReturnCode = 0;
+	WSAEVENT hAcceptEvent = WSA_INVALID_EVENT;
+	WSAEVENT EventList[2] = { 0 };
+
 	LOG("Do_LaunchServer entered.\n");
 
 	WS2_ASSERT(WSAStartup(MAKEWORD(2, 2), &wsaData) == 0, Exit);
@@ -276,7 +287,7 @@ int Do_LaunchServer(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath, USHORT usPor
 	LOG("  ChildTimeout:   %i seconds\n", dwTimeout);
 	LOG("  NetworkEnabled: %s\n", bNetworkEnabled ? _T("True") : _T("False"));
 
-	// Find or create appcontainer sid
+	// Find or create AppContainer sid
 	if (!SUCCEEDED(FindOrCreateAppContainerProfile(pszChildFilePath, &pApplicationSid))) {
 		PRINT("Failed to find or create an AppContainer profile for %s\n", pszChildFilePath);
 
@@ -339,6 +350,23 @@ int Do_LaunchServer(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath, USHORT usPor
 		HANDLE_FLAG_INHERIT,
 		0), Exit);
 
+	LOG("Creating WSA events.\n");
+	hAcceptEvent = WSACreateEvent();
+	WS2_ASSERT(hAcceptEvent != WSA_INVALID_EVENT, Exit);
+
+	g_hQuitListenEvent = WSACreateEvent();
+	WS2_ASSERT(g_hQuitListenEvent != WSA_INVALID_EVENT, Exit);
+
+	EventList[0] = hAcceptEvent;
+	EventList[1] = g_hQuitListenEvent;
+
+	LOG("Setting WSAEventSelect.\n");
+	WS2_ASSERT(WSAEventSelect(
+		serverSocket,
+		hAcceptEvent,
+		FD_ACCEPT
+		) != SOCKET_ERROR, Exit);
+	
 	LOG("Installing Ctrl-C handler.\n");
 	W32_ASSERT(SetConsoleCtrlHandler(HandleCtrlCPress, TRUE), Exit);
 
@@ -346,56 +374,90 @@ int Do_LaunchServer(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath, USHORT usPor
 	while (g_keepListening) {
 		SOCKET clientSocket = INVALID_SOCKET;
 		sin_size = sizeof(clientAddr);
-		// TODO: in the future, think about how to make this async
-		clientSocket = accept(
-			serverSocket,
-			(struct sockaddr *) &clientAddr,
-			&sin_size
-			);
-		if (clientSocket != INVALID_SOCKET) {
-			if (!g_keepListening) {
-				closesocket(clientSocket);
-				break;
-			}
 
-			RtlZeroMemory(clientIpAddr, sizeof(clientIpAddr));
-			PRINT(
-				"  Client connection from %s accepted.\n",
-				InetNtop(
+		dwReturnCode = WSAWaitForMultipleEvents(
+			sizeof(EventList) / sizeof(WSAEVENT),
+			EventList,
+			FALSE,
+			INFINITE,
+			FALSE
+			);
+		if (dwReturnCode == WSA_WAIT_EVENT_0) {
+			LOG("Sensed new client connection.\n");
+
+			clientSocket = accept(
+				serverSocket,
+				(struct sockaddr *) &clientAddr,
+				&sin_size
+				);
+			if (clientSocket != INVALID_SOCKET) {
+				RtlZeroMemory(clientIpAddr, sizeof(clientIpAddr));
+				PRINT(
+					"  Client connection from %s accepted.\n",
+					InetNtop(
 					((struct sockaddr_in *) &clientAddr)->sin_family,
 					(PVOID)&((struct sockaddr_in *) &clientAddr)->sin_addr,
 					clientIpAddr,
 					sizeof(clientIpAddr)
 					)
-				);
+					);
 
-			if (SUCCEEDED(CreateAppContainerWorker(
-				clientSocket,
-				hJob,
-				pszCurrentDirectory,
-				pApplicationSid,
-				pszChildFilePath,
-				pszCapabilitiesList
-				))) {
-				LOG("  Jailed process launched successfully.\n");
+				if (SUCCEEDED(CreateAppContainerWorker(
+					clientSocket,
+					hJob,
+					pszCurrentDirectory,
+					pApplicationSid,
+					pszChildFilePath,
+					pszCapabilitiesList
+					))) {
+					LOG("  Jailed process launched successfully.\n");
+				}
+				else {
+					LOG("  Failed to launch jailed process.\n");
+				}
+
+				closesocket(clientSocket);
+				WS2_ASSERT(WSAResetEvent(hAcceptEvent), Exit);
 			}
 			else {
-				LOG("  Failed to launch jailed process.\n");
+				ERR(
+					"Bad client request (nret = %08x, WSAGetLastError() = %i), client dropped.\n", 
+					clientSocket,
+					WSAGetLastError()
+					);
 			}
-
-			closesocket(clientSocket);
+		}
+		else if (dwReturnCode == WSA_WAIT_EVENT_0 + 1) {
+			LOG("g_hQuitListenEvent is set. Exiting.\n");
+			PRINT("Ctrl-C event detected. Exiting...\n");
+			break;
 		}
 		else {
-			ERR("Bad client request (WSAGetLastError() = %i), client dropped.\n", WSAGetLastError());
+			// XXX: This should be unreached...
+			//   Other possible cases as per MSDN documentation:
+			//    * WSA_WAIT_IO_COMPLETION - This value is only returned when fAlertable is TRUE.
+			//                               fAlertable is FALSE in my call.
+			//    * WSA_WAIT_TIMEOUT - This happens when the time-out interval has elapsed. However,
+			//                         our interval is INFINITE.
+			LOG("Unexpected value: dwReturnCode=%08x\n", dwReturnCode);
 		}
 	}
 
 	LOG("Removing Ctrl-C handler.\n");
 	W32_ASSERT(SetConsoleCtrlHandler(HandleCtrlCPress, FALSE), Exit);
+	PRINT("Goodbye.\n");
 
 	nret = 0;
 
 Exit:
+	if (hAcceptEvent != WSA_INVALID_EVENT) {
+		WSACloseEvent(hAcceptEvent);
+	}
+
+	if (g_hQuitListenEvent != WSA_INVALID_EVENT) {
+		WSACloseEvent(g_hQuitListenEvent);
+	}
+
 	if (hJob != INVALID_HANDLE_VALUE) {
 		CloseHandle(hJob);
 	}
@@ -437,14 +499,12 @@ int _tmain(int argc, _TCHAR* argv[])
 		return -1;
 	}
 
-	/*
 	// TODO: should we remove this check to be just a command-line argument?
-	if (!FileExists(CmdOpts.ChildFilePath)) {
-		ShowError("%s does not exist.", CmdOpts.ChildFilePath);
-
-		return -1;
-	}
-	*/
+	// if (!FileExists(CmdOpts.ChildFilePath)) {
+	//   ShowError("%s does not exist.", CmdOpts.ChildFilePath);
+	// 
+	// 	 return -1;
+	// }
 
 	// If a key file path is specified, make sure the file actually exists
 	if (CmdOpts.KeyFilePath && !FileExists(CmdOpts.KeyFilePath)) {
