@@ -8,7 +8,8 @@ typedef struct _CMD_OPTIONS
 {
 	BOOL HelpEnabled;
 	BOOL UninstallEnabled;
-	BOOL NetworkEnabled;
+	BOOL OutboundNetworkEnabled;
+	BOOL NoJail;
 	USHORT Port;
 	DWORD TimeoutSeconds;
 	LPTSTR KeyFilePath;
@@ -66,9 +67,12 @@ VOID ShowHelp(LPTSTR pszProgramPath)
 	PRINT("    associated access control entries if necessary and start listening as a server.\n");
 	PRINT("\n");
 	PRINT("  Options:\n");
-	PRINT("    /network            This switch enables the executable to be executed\n");
+	PRINT("    /outbound           This switch enables the executable to be executed\n");
 	PRINT("                        upon a client socket connection the ability to use\n");
 	PRINT("                        networking capability.\n");
+	PRINT("    /nojail             This option disables the creation of an AppContainer process.\n");
+	PRINT("                        A normal process will be created instead with the same permissions\n");
+	PRINT("                        as the parent process. (NOT RECOMMENDED)\n");
 	PRINT("    /port:number        Specifies the port number for the server to listen to.\n");
 	PRINT("                        The default port is %i.\n", DEFAULT_PORT);
 	PRINT("    /timeout:seconds    Specifies the number of seconds to allow the child\n");
@@ -107,8 +111,11 @@ HRESULT ParseCommandLineArgs(int argc, _TCHAR *argv[], PCMD_OPTIONS pCmdOpts)
 		else if (ArgMatchesOption(argv[i], "/uninstall")) {
 			pCmdOpts->UninstallEnabled = TRUE;
 		}
-		else if (ArgMatchesOption(argv[i], "/network")) {
-			pCmdOpts->NetworkEnabled = TRUE;
+		else if (ArgMatchesOption(argv[i], "/outbound")) {
+			pCmdOpts->OutboundNetworkEnabled = TRUE;
+		}
+		else if (ArgMatchesOption(argv[i], "/nojail")) {
+			pCmdOpts->NoJail = TRUE;
 		}
 		else if (ArgMatchesOptionWithArgument(argv[i], "/port:", 2)) {
 			USHORT usPort = (USHORT) _tcstoul(GetOptionArgument(argv[i], "/port:"), NULL, 10);
@@ -255,7 +262,13 @@ Exit:
 	return nret;
 }
 
-int Do_LaunchServer(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath, USHORT usPort, DWORD dwTimeout, BOOL bNetworkEnabled)
+int Do_LaunchServer(
+	LPTSTR pszChildFilePath, 
+	LPTSTR pszKeyFilePath, 
+	USHORT usPort, 
+	DWORD dwTimeout, 
+	BOOL bNetworkEnabled,
+	BOOL bNoJail)
 {
 	int nret = -1;
 	HRESULT hr = E_FAIL;
@@ -411,12 +424,13 @@ int Do_LaunchServer(LPTSTR pszChildFilePath, LPTSTR pszKeyFilePath, USHORT usPor
 					)
 					);
 
-				if (SUCCEEDED(CreateAppContainerWorker(
+				if (SUCCEEDED(CreateClientSocketWorker(
 					clientSocket,
 					hJob,
 					pszCurrentDirectory,
 					pApplicationSid,
 					pszChildFilePath,
+					bNoJail,
 					pszCapabilitiesList
 					))) {
 					LOG("  Jailed process launched successfully.\n");
@@ -542,7 +556,8 @@ int _tmain(int argc, _TCHAR* argv[])
 			CmdOpts.KeyFilePath, 
 			CmdOpts.Port, 
 			CmdOpts.TimeoutSeconds, 
-			CmdOpts.NetworkEnabled
+			CmdOpts.OutboundNetworkEnabled,
+			CmdOpts.NoJail
 			);
 	}
 }

@@ -16,11 +16,12 @@ HRESULT AddOrRemoveAceOnFileObjectAcl(
 	DWORD dwAccessMask
 	);
 HRESULT CreateLimitProcessTimeJobObject(DWORD dwTimeout, PHANDLE phJob);
-HRESULT CreateAppContainerWorker(
+HRESULT CreateClientSocketWorker(
 	SOCKET s,
 	HANDLE hJob,
 	LPCTSTR pszCurrentDirectory,
 	PSID pAppContainerSid,
 	LPCTSTR pszChildFilePath,
+	BOOL bWorkerIsJailed,
 	LPCTSTR *pszCapabilities
 	);

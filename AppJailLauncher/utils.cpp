@@ -369,12 +369,13 @@ Exit:
 	return hr;
 }
 
-HRESULT CreateAppContainerWorker(
+HRESULT CreateClientSocketWorker(
 	SOCKET s,
 	HANDLE hJob,
 	LPCTSTR pszCurrentDirectory,
 	PSID pAppContainerSid,
 	LPCTSTR pszChildFilePath,
+	BOOL bWorkerIsJailed,
 	LPCTSTR *pszCapabilities
 	)
 {
@@ -396,10 +397,9 @@ HRESULT CreateAppContainerWorker(
 	ASSERT(pAppContainerSid != NULL, Exit);
 	ASSERT(pszChildFilePath != NULL, Exit);
 
-	si.StartupInfo.cb = sizeof(si);
-
-	// Parse a list of capability SIDs in string format
-	if (pszCapabilities) {
+	// Parse a list of capability SIDs in string format only if the list is not NULL NS
+	// the worker is to be jailed.
+	if (bWorkerIsJailed && pszCapabilities) {
 		LOG("pszCapabilities is not NULL, counting items.\n");
 		while (pszCapabilities[dwCapabilitiesCount] != NULL) {
 			dwCapabilitiesCount++;
@@ -423,42 +423,55 @@ HRESULT CreateAppContainerWorker(
 		LOG("No capabilities provided.\n");
 	}
 
-	// Set up security capabilities
-	SecurityCapabilities.AppContainerSid = pAppContainerSid;
-	SecurityCapabilities.Capabilities = CapabilitiesList;
-	SecurityCapabilities.CapabilityCount = dwCapabilitiesCount;
+	// Handle cases in which the client worker process is not to be jailed. 
+	// TODO:
+	//   In the future, this may need to be refactored for when we have another AttributeList
+	//   item (for inherited HANDLEs).
+	if (bWorkerIsJailed) {
+		// Set up security capabilities
+		SecurityCapabilities.AppContainerSid = pAppContainerSid;
+		SecurityCapabilities.Capabilities = CapabilitiesList;
+		SecurityCapabilities.CapabilityCount = dwCapabilitiesCount;
 
-	// Set up thread attribute list
-	W32_ASSERT(!InitializeProcThreadAttributeList(
-		NULL,
-		1,
-		0,
-		&dwAttributeListSize
-		), Exit);
+		// Set up thread attribute list
+		W32_ASSERT(!InitializeProcThreadAttributeList(
+			NULL,
+			1,
+			0,
+			&dwAttributeListSize
+			), Exit);
 
-	LOG("Allocating memory for AttributeList (%i bytes)\n", dwAttributeListSize);
-	AttributeList = (LPPROC_THREAD_ATTRIBUTE_LIST)ALLOC(dwAttributeListSize);
-	ASSERT(AttributeList != NULL, Exit);
-	
-	LOG("Initializing AttributeList at 0x%016p\n", AttributeList);
-	W32_ASSERT(InitializeProcThreadAttributeList(
-		AttributeList,
-		1,
-		0,
-		&dwAttributeListSize
-		), Exit);
+		LOG("Allocating memory for AttributeList (%i bytes)\n", dwAttributeListSize);
+		AttributeList = (LPPROC_THREAD_ATTRIBUTE_LIST)ALLOC(dwAttributeListSize);
+		ASSERT(AttributeList != NULL, Exit);
 
-	LOG("Updating AttributeList with security capabilities.\n");
-	W32_ASSERT(UpdateProcThreadAttribute(
-		AttributeList,
-		0,
-		PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
-		&SecurityCapabilities,
-		sizeof(SecurityCapabilities),
-		NULL,
-		NULL), Exit);
+		LOG("Initializing AttributeList at 0x%016p\n", AttributeList);
+		W32_ASSERT(InitializeProcThreadAttributeList(
+			AttributeList,
+			1,
+			0,
+			&dwAttributeListSize
+			), Exit);
 
-	si.lpAttributeList = AttributeList;
+		LOG("Updating AttributeList with security capabilities.\n");
+		W32_ASSERT(UpdateProcThreadAttribute(
+			AttributeList,
+			0,
+			PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
+			&SecurityCapabilities,
+			sizeof(SecurityCapabilities),
+			NULL,
+			NULL), Exit);
+
+		// For spawning jailed process, we need to set the count to sizeof(STARTUPINFOEX) for
+		// the attribute list
+		si.StartupInfo.cb = sizeof(si);
+		si.lpAttributeList = AttributeList;
+	}
+	else {
+		// We are not jailing the client worker so we pretend to send a normal STARTUPINFO structure
+		si.StartupInfo.cb = sizeof(si.StartupInfo);
+	}
 
 	// Setup STDIN/STDOUT/STDERR redirection
 	LOG("Redirecting STDIN/STDOUT/STDERR of the new application.\n");
