@@ -94,7 +94,7 @@ VOID ShowHelp(LPTSTR pszProgramPath)
 	PRINT("                        cross-contamination between capture-the-flag challenges.\n");
 	PRINT("\n");
 	PRINT("  Examples:\n");
-	PRINT("    %s /network /key:flag /port:4141 /timeout:2 C:\\work\\child.exe\n", pszProgramPath);
+	PRINT("    %s /outbound /key:flag /port:4141 /timeout:2 C:\\work\\child.exe\n", pszProgramPath);
 	PRINT("    %s /uninstall /key:flag C:\\work\\child.exe\n", pszProgramPath);
 }
 
@@ -430,7 +430,7 @@ int Do_LaunchServer(
 					pszCurrentDirectory,
 					pApplicationSid,
 					pszChildFilePath,
-					bNoJail,
+					bNoJail ? FALSE : TRUE,
 					pszCapabilitiesList
 					))) {
 					LOG("  Jailed process launched successfully.\n");

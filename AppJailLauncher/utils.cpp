@@ -383,6 +383,7 @@ HRESULT CreateClientSocketWorker(
 
 	LPTSTR pszCommandLine = NULL;
 	PSID pSid = NULL;
+	DWORD dwCreationFlags = CREATE_SUSPENDED;
 	DWORD dwCapabilitiesCount = 0;
 	DWORD dwAttributeListSize = 0;
 	LPPROC_THREAD_ATTRIBUTE_LIST AttributeList = NULL;
@@ -467,11 +468,16 @@ HRESULT CreateClientSocketWorker(
 		// the attribute list
 		si.StartupInfo.cb = sizeof(si);
 		si.lpAttributeList = AttributeList;
+
+		// Make sure CreateProcess knows it is using extended STARTUPINFO
+		dwCreationFlags |= EXTENDED_STARTUPINFO_PRESENT;
 	}
 	else {
+		// FIXME: this is causing a crash
 		// We are not jailing the client worker so we pretend to send a normal STARTUPINFO structure
 		si.StartupInfo.cb = sizeof(si.StartupInfo);
 	}
+	LOG("si.StartupInfo.cb = %i\n", si.StartupInfo.cb);
 
 	// Setup STDIN/STDOUT/STDERR redirection
 	LOG("Redirecting STDIN/STDOUT/STDERR of the new application.\n");
@@ -480,7 +486,7 @@ HRESULT CreateClientSocketWorker(
 	si.StartupInfo.hStdOutput = (HANDLE) s;
 	si.StartupInfo.hStdError = (HANDLE) s;
 	si.StartupInfo.wShowWindow = SW_HIDE;
-
+	
 	// Copy the child file path and spawn process
 	LOG("Copying pszChildFilePath to pszCommandLine.\n");
 	pszCommandLine = (LPTSTR) ALLOC((_tcslen(pszChildFilePath) + 2) * sizeof(_TCHAR));
@@ -495,7 +501,7 @@ HRESULT CreateClientSocketWorker(
 		NULL,
 		TRUE, // TODO: FIXME: I don't like how we're just blanket allowing all handles to be
 		      //              inherited.
-		EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED,
+		dwCreationFlags,
 		NULL,
 		pszCurrentDirectory,
 		(LPSTARTUPINFO) &si,
