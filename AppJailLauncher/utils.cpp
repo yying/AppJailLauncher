@@ -473,7 +473,6 @@ HRESULT CreateClientSocketWorker(
 		dwCreationFlags |= EXTENDED_STARTUPINFO_PRESENT;
 	}
 	else {
-		// FIXME: this is causing a crash
 		// We are not jailing the client worker so we pretend to send a normal STARTUPINFO structure
 		si.StartupInfo.cb = sizeof(si.StartupInfo);
 	}
